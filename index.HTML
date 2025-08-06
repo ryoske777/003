@@ -1,0 +1,326 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8" />
+  <title>스토어 매출 순위 차트</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <script src="https://cdn.jsdelivr.net/npm/echarts@5/dist/echarts.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/papaparse@5.4.1/papaparse.min.js"></script>
+  <style>
+    :root{--bg:#f6f7fb;--panel:#fff;--muted:#607086;--text:#0b1020;--accent:#2e6bff;--border:#e6e9f0;--chip:#f0f4ff}
+    *{box-sizing:border-box}
+    body{margin:0;background:var(--bg);color:var(--text);font-family:ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,"Noto Sans KR",Arial,sans-serif}
+    header{position:sticky;top:0;z-index:10;background:rgba(255,255,255,.85);border-bottom:1px solid var(--border);backdrop-filter:saturate(1.3) blur(8px);padding:12px 16px;display:flex;gap:12px;align-items:center}
+    header .dot{width:8px;height:8px;border-radius:50%;background:var(--accent);box-shadow:0 0 8px rgba(46,107,255,.6)}
+    header h1{margin:0;font-size:16px}
+    main{max-width:1200px;margin:14px auto;padding:0 12px;display:grid;gap:12px}
+    .card{background:var(--panel);border:1px solid var(--border);border-radius:14px;box-shadow:0 8px 24px rgba(10,30,70,.06)}
+    /* >>> 컨트롤 박스 덩치 줄이기(총 ~83px 감소) */
+    .controls{padding:10px 12px 6px;display:grid;gap:8px}
+    .row{display:flex;flex-wrap:wrap;gap:10px;align-items:center}
+    label{font-size:13px;color:var(--muted)}
+    select,input[type="text"],input[type="date"],button{background:#fff;color:var(--text);border:1px solid var(--border);border-radius:10px;padding:8px 10px;font-size:14px;outline:none}
+    select:focus,input[type="text"]:focus,input[type="date"]:focus{border-color:#cdd8ff;box-shadow:0 0 0 3px rgba(46,107,255,.15)}
+    #platformSel{min-width:150px}
+    .range-wrap{display:flex;align-items:center;gap:6px}
+    .btn-ghost{background:#fff;border:1px solid var(--border);padding:6px 10px;border-radius:10px;cursor:pointer}
+    .btn-ghost:hover{box-shadow:0 0 0 3px rgba(46,107,255,.08)}
+    .sep{color:#9aa7bd;font-size:12px}
+    .search-wrap{position:relative;display:inline-block}
+    .clear-btn{position:absolute;right:6px;top:50%;transform:translateY(-50%);background:transparent;border:none;font-size:18px;color:#9aa7bd;cursor:pointer;display:none;line-height:1;padding:0 4px;border-radius:8px}
+    .clear-btn:hover{color:#66799b;background:#eef2ff}
+    .switch{position:relative;display:inline-flex;gap:8px;align-items:center}
+    .switch input{display:none}
+    .track{width:42px;height:22px;background:#eef2ff;border:1px solid var(--border);border-radius:999px;position:relative;transition:.2s}
+    .thumb{position:absolute;top:2px;left:2px;width:18px;height:18px;border-radius:50%;background:#c7d4ff;transition:.2s;box-shadow:0 2px 6px rgba(0,0,0,.15)}
+    .switch input:checked + .track{background:#dfe8ff;border-color:#c7d4ff}
+    .switch input:checked + .track .thumb{left:22px;background:var(--accent);box-shadow:0 0 10px rgba(46,107,255,.35)}
+    .switch span{font-size:13px;color:var(--muted)}
+    /* 리스트 라인 여백↓, 높이↓ */
+    .listRow{display:flex;gap:12px;align-items:flex-start;padding:0 8px 6px}
+    #gameList{
+      width:560px;height:180px; /* ↓ 260 → 180 (80px 감소) */
+      padding:8px;background:#fff;border:1px solid var(--border);border-radius:12px;color:var(--text);
+      overscroll-behavior:contain;
+    }
+    #rightCol{display:flex;flex-direction:column;gap:8px;align-items:flex-start;padding-top:0}
+    #btnDraw{background:var(--accent);border:none;color:#fff;font-weight:600;padding:10px 14px;border-radius:12px;cursor:pointer;transition:.15s transform,.15s filter}
+    #btnDraw:hover{transform:translateY(-1px);filter:brightness(1.05)}
+    #picked{min-height:30px}
+    #picked .chip{display:inline-flex;align-items:center;gap:6px;background:var(--chip);border:1px solid var(--border);color:#284b9c;padding:6px 8px;border-radius:999px;margin:4px 6px 0 0;font-size:12px}
+    .chip-close{background:transparent;border:none;color:#7f8db1;cursor:pointer;font-size:14px;line-height:1;padding:0 2px;border-radius:6px}
+    .chip-close:hover{color:#4d5f87;background:#e8eefc}
+    #chart{width:100%;height:560px}
+    @media (max-width:900px){#gameList{width:100%}.listRow{flex-direction:column}}
+  </style>
+</head>
+<body>
+<header><span class="dot"></span><h1>스토어 매출 순위 차트</h1></header>
+
+<main>
+  <section class="card controls">
+    <div class="row">
+      <label>플랫폼</label>
+      <select id="platformSel">
+        <option value="">(전체)</option>
+        <option value="구글플레이">Google</option>
+        <option value="앱스토어">Apple</option>
+        <option value="원스토어">One</option>
+      </select>
+
+      <div class="range-wrap">
+        <button type="button" id="btnAll" class="btn-ghost">전체 기간</button>
+        <input type="date" id="startDate"><span class="sep">~</span><input type="date" id="endDate">
+      </div>
+
+      <label>게임 검색</label>
+      <div class="search-wrap">
+        <input id="gameSearch" type="text" placeholder="이름으로 필터링" />
+        <button type="button" id="btnClearSearch" class="clear-btn" aria-label="검색 지우기">×</button>
+      </div>
+
+      <label class="switch" style="margin-left:auto;">
+        <input type="checkbox" id="multiToggle">
+        <span class="track"><i class="thumb"></i></span>
+        <span>다중 앱 선택</span>
+      </label>
+    </div>
+
+    <div class="listRow">
+      <div>
+        <label>게임 목록</label><br />
+        <select id="gameList" multiple size="10"></select>
+      </div>
+      <div id="rightCol">
+        <button id="btnDraw">차트 그리기</button>
+        <div id="picked"></div>
+      </div>
+    </div>
+  </section>
+
+  <section class="card" style="padding:10px 10px 4px">
+    <div id="chart"></div>
+  </section>
+</main>
+
+<script>
+const CSV_URL="https://ryoske777.github.io/rank-data/RANK_DATA.csv";
+const el=id=>document.getElementById(id);
+
+/* ---- 날짜 라벨 유틸 ---- */
+function buildDateFormatter(dates){
+  const firstOfYear=new Map();
+  dates.forEach((d,i)=>{const y=String(d.getFullYear()).slice(-2);if(!firstOfYear.has(y))firstOfYear.set(y,i)});
+  const tokens=dates.map((d,i)=>{
+    const mm=String(d.getMonth()+1).padStart(2,'0');
+    const dd=String(d.getDate()).padStart(2,'0');
+    const y2=String(d.getFullYear()).slice(-2);
+    return (firstOfYear.get(y2)===i)?`${mm}/${dd}\n'${y2}`:`${mm}/${dd}`;
+  });
+  return(_,i)=>tokens[i]??'';
+}
+function buildIntervalFn(dates,target=14){
+  const n=dates.length||1, step=Math.max(1,Math.ceil(n/target));
+  const must=new Set(), seen=new Set();
+  dates.forEach((d,i)=>{const y=d.getFullYear(); if(!seen.has(y)){seen.add(y); must.add(i);}});
+  return i=>(i%step===0)||must.has(i);
+}
+function uniqueSortedDates(rows){const set=new Set(rows.map(r=>r.date));return[...set].sort().map(s=>new Date(s));}
+
+/* ---- 리스트 다중선택(스크롤 튐 방지 강화) ---- */
+function setupMultiSelect(listEl, checkboxEl){
+  let lastScroll=0, lock=false;
+  const apply=(opt)=>{ if(!opt) return;
+    if(checkboxEl.checked) opt.selected=!opt.selected;
+    else { for(const o of listEl.options) o.selected=false; opt.selected=true; }
+    listEl.dispatchEvent(new Event('manual-change'));
+  };
+  const keep=()=>{ if(!lock) return; listEl.scrollTop=lastScroll; requestAnimationFrame(keep); };
+  listEl.addEventListener('pointerdown',(e)=>{
+    const opt=e.target.closest('option'); if(!opt) return;
+    lastScroll=listEl.scrollTop; lock=true; e.preventDefault();
+    apply(opt);
+    try{ listEl.focus({preventScroll:true}); }catch{ listEl.focus(); }
+    requestAnimationFrame(()=>{ listEl.scrollTop=lastScroll; });
+    keep(); setTimeout(()=>lock=false,120);
+  }, true);
+  listEl.addEventListener('click',e=>e.preventDefault(),true);
+  listEl.addEventListener('keydown',(e)=>{
+    if(e.key===' '||e.key==='Enter'){
+      const opt=listEl.options[listEl.selectedIndex];
+      lastScroll=listEl.scrollTop; lock=true; e.preventDefault(); apply(opt);
+      try{ listEl.focus({preventScroll:true}); }catch{ listEl.focus(); }
+      requestAnimationFrame(()=>{ listEl.scrollTop=lastScroll; }); setTimeout(()=>lock=false,120);
+    }
+  });
+  listEl.addEventListener('scroll',()=>{ if(lock) listEl.scrollTop=lastScroll; });
+}
+
+/* ---- 상태 & 엘리먼트 ---- */
+let RAW_ROWS=[], ALL_DATES=[], MIN_DATE="", MAX_DATE="";
+const platformSel=el('platformSel');
+const gameSearch=el('gameSearch');
+const btnClearSearch=el('btnClearSearch');
+const gameList=el('gameList');
+const multiToggle=el('multiToggle');
+const pickedWrap=el('picked');
+const btnDraw=el('btnDraw');
+const startDate=el('startDate');
+const endDate=el('endDate');
+const btnAll=el('btnAll');
+
+setupMultiSelect(gameList, multiToggle);
+
+/* ---- 데이터 로드 ---- */
+async function fetchCSV(url){
+  const res=await fetch(url,{cache:'no-store'});
+  if(!res.ok) throw new Error('CSV 응답 실패');
+  const buf=await res.arrayBuffer();
+  let text=new TextDecoder('utf-8',{fatal:false}).decode(buf);
+  const bad=(text.match(/\uFFFD/g)||[]).length;
+  if(bad>10){try{text=new TextDecoder('euc-kr').decode(buf);}catch{}}
+  return text;
+}
+function normalizeHeader(h){
+  const k=(h||'').trim().toLowerCase();
+  if(k.includes('플랫폼'))return'platform';
+  if(k.includes('날짜')||k==='date')return'date';
+  if(k.includes('순위')||k==='rank')return'rank';
+  if(k.includes('게임')||k==='title'||k.includes('이름'))return'title';
+  return k;
+}
+function parseRows(csv){
+  const p=Papa.parse(csv,{header:true,skipEmptyLines:true});
+  const map={}; (p.meta?.fields||[]).forEach(f=>map[f]=normalizeHeader(f));
+  const rows=[];
+  p.data.forEach(o=>{
+    const get=want=>{const src=Object.keys(map).find(k=>map[k]===want);return src?o[src]:o[want]};
+    const r={platform:get('platform')??'',date:String(get('date')??'').slice(0,10),rank:Number(get('rank')),title:get('title')??''};
+    if(!r.date||!r.title||!isFinite(r.rank)) return;
+    rows.push(r);
+  });
+  rows.sort((a,b)=>a.date.localeCompare(b.date)||a.title.localeCompare(b.title,'ko'));
+  return rows;
+}
+async function loadData(){
+  try{
+    const csv=await fetchCSV(CSV_URL);
+    RAW_ROWS=parseRows(csv);
+    ALL_DATES=uniqueSortedDates(RAW_ROWS);
+    MIN_DATE=ALL_DATES[0].toISOString().slice(0,10);
+    MAX_DATE=ALL_DATES[ALL_DATES.length-1].toISOString().slice(0,10);
+    startDate.min=endDate.min=MIN_DATE; startDate.max=endDate.max=MAX_DATE;
+    startDate.value=MIN_DATE; endDate.value=MAX_DATE;
+    refreshGameList();
+  }catch(e){console.error(e); alert('데이터 불러오기 실패: '+e.message);}
+}
+
+/* ---- UI ---- */
+function refreshGameList(){
+  const platform=platformSel.value;
+  const keyword=gameSearch.value.trim();
+  const set=new Set();
+  RAW_ROWS.forEach(r=>{
+    if(platform && r.platform!==platform) return;
+    if(keyword && !r.title.includes(keyword)) return;
+    set.add(r.title);
+  });
+  const items=[...set].sort((a,b)=>a.localeCompare(b,'ko'));
+  const keep=gameList.scrollTop;
+  gameList.innerHTML='';
+  items.forEach(t=>{
+    const o=document.createElement('option');
+    o.value=o.textContent=t;
+    gameList.appendChild(o);
+  });
+  gameList.scrollTop=keep;
+  renderPickedChips();
+}
+function renderPickedChips(){
+  const picked=[...gameList.selectedOptions].map(o=>o.value);
+  pickedWrap.innerHTML=picked.length?picked.map(p=>`<span class="chip">${p}<button type="button" class="chip-close" data-title="${p}" aria-label="삭제">×</button></span>`).join(''):'';
+}
+pickedWrap.addEventListener('click',(e)=>{
+  if(e.target.classList.contains('chip-close')){
+    const t=e.target.dataset.title;
+    for(const o of gameList.options){ if(o.value===t) o.selected=false; }
+    renderPickedChips();
+  }
+});
+platformSel.addEventListener('change',refreshGameList);
+gameSearch.addEventListener('input',()=>{
+  refreshGameList();
+  btnClearSearch.style.display=gameSearch.value?'block':'none';
+});
+btnClearSearch.addEventListener('click',()=>{gameSearch.value='';btnClearSearch.style.display='none';refreshGameList();});
+gameList.addEventListener('manual-change',renderPickedChips);
+btnAll.addEventListener('click',()=>{startDate.value=MIN_DATE; endDate.value=MAX_DATE;});
+
+/* ---- 차트 ---- */
+const chart=echarts.init(document.getElementById('chart'));
+function drawChart(){
+  if(!RAW_ROWS.length) return alert('데이터가 없습니다.');
+  const platform=platformSel.value;
+  const picked=[...gameList.selectedOptions].map(o=>o.value);
+  if(!picked.length) return alert('게임을 하나 이상 선택하세요.');
+  const s=startDate.value||MIN_DATE, e=endDate.value||MAX_DATE;
+
+  const rows=RAW_ROWS.filter(r=>{
+    if(platform && r.platform!==platform) return false;
+    if(!picked.includes(r.title)) return false;
+    return r.date>=s && r.date<=e;
+  });
+
+  const dateObjs=uniqueSortedDates(rows);
+  const dateStrs=dateObjs.map(d=>d.toISOString().slice(0,10));
+
+  const groups={};
+  rows.forEach(r=>{
+    const key=(platform?'':`${r.platform}: `)+r.title;
+    (groups[key]??=[]).push(r);
+  });
+  const series=Object.entries(groups).map(([name,arr])=>{
+    const map=new Map(arr.map(x=>[x.date,x.rank]));
+    const data=dateStrs.map(ds=>map.has(ds)?map.get(ds):null);
+    return {name,type:'line',data,connectNulls:true,showSymbol:true,symbolSize:5,lineStyle:{width:2}};
+  });
+
+  const platformLabel=platform?({'구글플레이':'Google','앱스토어':'Apple','원스토어':'One'}[platform]):'전체';
+
+  chart.setOption({
+    backgroundColor:'transparent',
+    title:{text:`[${platformLabel}] 날짜별 매출 순위 비교`,left:'center',top:6,textStyle:{fontSize:14,color:'#1c2434'}},
+    tooltip:{trigger:'axis',axisPointer:{type:'line'}},
+    legend:{top:30,type:'scroll',textStyle:{color:'#22324a'}},
+    /* 여백 재조정: 아래 80 유지, 왼쪽을 약간 넉넉히 */
+    grid:{left:60,right:16,top:58,bottom:80},
+    xAxis:{
+      type:'category',data:dateStrs,boundaryGap:false,
+      axisLine:{lineStyle:{color:'#ccd3e2'}},
+      /* 첫 라벨이 y축과 겹치지 않게 왼쪽 패딩 + 라벨 간격 */
+      axisLabel:{interval:buildIntervalFn(dateObjs,14),formatter:buildDateFormatter(dateObjs),hideOverlap:true,fontSize:11,color:'#3b4a66',margin:14,padding:[8,0,0,8]},
+      axisTick:{show:false}
+    },
+    yAxis:{
+      type:'value',min:1,max:100,inverse:true,name:'순위',
+      /* <<< 이름을 세로 중앙으로 이동해서 좌하단 겹침 제거 */
+      nameLocation:'middle',
+      nameGap:48,
+      axisLine:{lineStyle:{color:'#ccd3e2'}},axisTick:{show:false},
+      splitLine:{lineStyle:{color:'rgba(71,85,105,.18)'}},
+      nameTextStyle:{color:'#607086',fontSize:12},
+      axisLabel:{margin:12,padding:[0,0,6,0]}
+    },
+    series
+  },true);
+
+  window.dispatchEvent(new Event('resize'));
+}
+btnDraw.addEventListener('click',drawChart);
+window.addEventListener('resize',()=>chart.resize());
+
+/* 초기 로드 */
+loadData();
+</script>
+</body>
+</html>
