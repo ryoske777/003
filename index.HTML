@@ -15,7 +15,6 @@
     header h1{margin:0;font-size:16px}
     main{max-width:1200px;margin:14px auto;padding:0 12px;display:grid;gap:12px}
     .card{background:var(--panel);border:1px solid var(--border);border-radius:14px;box-shadow:0 8px 24px rgba(10,30,70,.06)}
-    /* >>> 컨트롤 박스 덩치 줄이기(총 ~83px 감소) */
     .controls{padding:10px 12px 6px;display:grid;gap:8px}
     .row{display:flex;flex-wrap:wrap;gap:10px;align-items:center}
     label{font-size:13px;color:var(--muted)}
@@ -23,7 +22,7 @@
     select:focus,input[type="text"]:focus,input[type="date"]:focus{border-color:#cdd8ff;box-shadow:0 0 0 3px rgba(46,107,255,.15)}
     #platformSel{min-width:150px}
     .range-wrap{display:flex;align-items:center;gap:6px}
-    .btn-ghost{background:#fff;border:1px solid var(--border);padding:6px 10px;border-radius:10px;cursor:pointer}
+    .btn-ghost{background:#fff;border:1px solid var(--border);padding:8px 12px;border-radius:10px;cursor:pointer}
     .btn-ghost:hover{box-shadow:0 0 0 3px rgba(46,107,255,.08)}
     .sep{color:#9aa7bd;font-size:12px}
     .search-wrap{position:relative;display:inline-block}
@@ -36,22 +35,22 @@
     .switch input:checked + .track{background:#dfe8ff;border-color:#c7d4ff}
     .switch input:checked + .track .thumb{left:22px;background:var(--accent);box-shadow:0 0 10px rgba(46,107,255,.35)}
     .switch span{font-size:13px;color:var(--muted)}
-    /* 리스트 라인 여백↓, 높이↓ */
+
     .listRow{display:flex;gap:12px;align-items:flex-start;padding:0 8px 6px}
     #gameList{
-      width:560px;height:180px; /* ↓ 260 → 180 (80px 감소) */
+      width:560px;height:180px;
       padding:8px;background:#fff;border:1px solid var(--border);border-radius:12px;color:var(--text);
       overscroll-behavior:contain;
     }
-    #rightCol{display:flex;flex-direction:column;gap:8px;align-items:flex-start;padding-top:0}
-    #btnDraw{background:var(--accent);border:none;color:#fff;font-weight:600;padding:10px 14px;border-radius:12px;cursor:pointer;transition:.15s transform,.15s filter}
+    #rightCol{display:flex;flex-direction:column;gap:8px;align-items:flex-start;padding-top:22px;} /* 버튼 살짝 내려 정렬 */
+    #btnDraw{background:var(--accent);border:none;color:#fff;font-weight:600;padding:10px 16px;border-radius:12px;cursor:pointer;transition:.15s transform,.15s filter;min-width:120px}
     #btnDraw:hover{transform:translateY(-1px);filter:brightness(1.05)}
     #picked{min-height:30px}
     #picked .chip{display:inline-flex;align-items:center;gap:6px;background:var(--chip);border:1px solid var(--border);color:#284b9c;padding:6px 8px;border-radius:999px;margin:4px 6px 0 0;font-size:12px}
     .chip-close{background:transparent;border:none;color:#7f8db1;cursor:pointer;font-size:14px;line-height:1;padding:0 2px;border-radius:6px}
     .chip-close:hover{color:#4d5f87;background:#e8eefc}
     #chart{width:100%;height:560px}
-    @media (max-width:900px){#gameList{width:100%}.listRow{flex-direction:column}}
+    @media (max-width:900px){#gameList{width:100%}.listRow{flex-direction:column} .row{gap:8px}}
   </style>
 </head>
 <body>
@@ -82,7 +81,7 @@
       <label class="switch" style="margin-left:auto;">
         <input type="checkbox" id="multiToggle">
         <span class="track"><i class="thumb"></i></span>
-        <span>다중 앱 선택</span>
+        <span>앱 다중 선택</span>
       </label>
     </div>
 
@@ -92,7 +91,10 @@
         <select id="gameList" multiple size="10"></select>
       </div>
       <div id="rightCol">
-        <button id="btnDraw">차트 그리기</button>
+        <div style="display:flex; gap:8px;">
+          <button id="btnDraw">차트</button>
+          <button id="btnClearPicked" class="btn-ghost" title="선택한 모든 키워드 지우기">키워드 모두 삭제</button>
+        </div>
         <div id="picked"></div>
       </div>
     </div>
@@ -127,7 +129,7 @@ function buildIntervalFn(dates,target=14){
 }
 function uniqueSortedDates(rows){const set=new Set(rows.map(r=>r.date));return[...set].sort().map(s=>new Date(s));}
 
-/* ---- 리스트 다중선택(스크롤 튐 방지 강화) ---- */
+/* ---- 리스트 다중선택(스크롤 튐 방지 + 선택 유지) ---- */
 function setupMultiSelect(listEl, checkboxEl){
   let lastScroll=0, lock=false;
   const apply=(opt)=>{ if(!opt) return;
@@ -165,6 +167,7 @@ const gameList=el('gameList');
 const multiToggle=el('multiToggle');
 const pickedWrap=el('picked');
 const btnDraw=el('btnDraw');
+const btnClearPicked=el('btnClearPicked');
 const startDate=el('startDate');
 const endDate=el('endDate');
 const btnAll=el('btnAll');
@@ -219,32 +222,57 @@ async function loadData(){
 function refreshGameList(){
   const platform=platformSel.value;
   const keyword=gameSearch.value.trim();
-  const set=new Set();
-  RAW_ROWS.forEach(r=>{
-    if(platform && r.platform!==platform) return;
-    if(keyword && !r.title.includes(keyword)) return;
-    set.add(r.title);
+
+  // 현재 선택된 타이틀을 보존
+  const selectedNow=new Set([...gameList.options].filter(o=>o.selected).map(o=>o.value));
+
+  // 후보 수집
+  const allTitles=new Set();
+  RAW_ROWS.forEach(r=>{ if(!platform || r.platform===platform) allTitles.add(r.title); });
+
+  // 검색 결과
+  const matched=[...allTitles].filter(t=>!keyword || t.includes(keyword));
+
+  // "선택된 항목은 항상 표시 + 위쪽에 고정" 로직
+  const selectedList=[...selectedNow].filter(t=>allTitles.has(t));
+  const rest=matched.filter(t=>!selectedNow.has(t));
+
+  const items=[...new Set([...selectedList, ...rest])].sort((a,b)=>{
+    // 선택된 것 우선(정렬 유지), 나머지는 한글 정렬
+    if(selectedNow.has(a) && !selectedNow.has(b)) return -1;
+    if(!selectedNow.has(a) && selectedNow.has(b)) return 1;
+    return a.localeCompare(b,'ko');
   });
-  const items=[...set].sort((a,b)=>a.localeCompare(b,'ko'));
+
   const keep=gameList.scrollTop;
   gameList.innerHTML='';
   items.forEach(t=>{
     const o=document.createElement('option');
     o.value=o.textContent=t;
+    if(selectedNow.has(t)) o.selected=true;   // 선택 유지
     gameList.appendChild(o);
   });
   gameList.scrollTop=keep;
+
   renderPickedChips();
+  toggleClearPickedBtn();
 }
 function renderPickedChips(){
   const picked=[...gameList.selectedOptions].map(o=>o.value);
-  pickedWrap.innerHTML=picked.length?picked.map(p=>`<span class="chip">${p}<button type="button" class="chip-close" data-title="${p}" aria-label="삭제">×</button></span>`).join(''):'';
+  pickedWrap.innerHTML=picked.length
+    ? picked.map(p=>`<span class="chip">${p}<button type="button" class="chip-close" data-title="${p}" aria-label="삭제">×</button></span>`).join('')
+    : '';
+}
+function toggleClearPickedBtn(){
+  btnClearPicked.disabled = gameList.selectedOptions.length===0;
+  btnClearPicked.style.opacity = btnClearPicked.disabled ? .5 : 1;
 }
 pickedWrap.addEventListener('click',(e)=>{
   if(e.target.classList.contains('chip-close')){
     const t=e.target.dataset.title;
     for(const o of gameList.options){ if(o.value===t) o.selected=false; }
     renderPickedChips();
+    toggleClearPickedBtn();
   }
 });
 platformSel.addEventListener('change',refreshGameList);
@@ -253,8 +281,13 @@ gameSearch.addEventListener('input',()=>{
   btnClearSearch.style.display=gameSearch.value?'block':'none';
 });
 btnClearSearch.addEventListener('click',()=>{gameSearch.value='';btnClearSearch.style.display='none';refreshGameList();});
-gameList.addEventListener('manual-change',renderPickedChips);
+gameList.addEventListener('manual-change',()=>{renderPickedChips();toggleClearPickedBtn();});
 btnAll.addEventListener('click',()=>{startDate.value=MIN_DATE; endDate.value=MAX_DATE;});
+btnClearPicked.addEventListener('click',()=>{
+  for(const o of gameList.options) o.selected=false;
+  renderPickedChips();
+  toggleClearPickedBtn();
+});
 
 /* ---- 차트 ---- */
 const chart=echarts.init(document.getElementById('chart'));
@@ -292,20 +325,16 @@ function drawChart(){
     title:{text:`[${platformLabel}] 날짜별 매출 순위 비교`,left:'center',top:6,textStyle:{fontSize:14,color:'#1c2434'}},
     tooltip:{trigger:'axis',axisPointer:{type:'line'}},
     legend:{top:30,type:'scroll',textStyle:{color:'#22324a'}},
-    /* 여백 재조정: 아래 80 유지, 왼쪽을 약간 넉넉히 */
     grid:{left:60,right:16,top:58,bottom:80},
     xAxis:{
       type:'category',data:dateStrs,boundaryGap:false,
       axisLine:{lineStyle:{color:'#ccd3e2'}},
-      /* 첫 라벨이 y축과 겹치지 않게 왼쪽 패딩 + 라벨 간격 */
       axisLabel:{interval:buildIntervalFn(dateObjs,14),formatter:buildDateFormatter(dateObjs),hideOverlap:true,fontSize:11,color:'#3b4a66',margin:14,padding:[8,0,0,8]},
       axisTick:{show:false}
     },
     yAxis:{
       type:'value',min:1,max:100,inverse:true,name:'순위',
-      /* <<< 이름을 세로 중앙으로 이동해서 좌하단 겹침 제거 */
-      nameLocation:'middle',
-      nameGap:48,
+      nameLocation:'middle',nameGap:48,
       axisLine:{lineStyle:{color:'#ccd3e2'}},axisTick:{show:false},
       splitLine:{lineStyle:{color:'rgba(71,85,105,.18)'}},
       nameTextStyle:{color:'#607086',fontSize:12},
